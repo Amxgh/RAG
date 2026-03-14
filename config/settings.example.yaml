@@ -1,0 +1,47 @@
+app_name: WAAM Research RAG
+environment: local
+storage_dir: data
+uploads_dir: data/uploads
+log_level: INFO
+log_json: true
+vector_backend: sqlite_local
+
+embedding_backend: hashing
+embedding_model: intfloat/e5-base-v2
+embedding_batch_size: 16
+
+chunk_size_tokens: 700
+chunk_overlap_tokens: 120
+top_k: 8
+retrieve_candidates: 24
+dense_top_k: 24
+sparse_top_k: 24
+fusion_rrf_k: 60
+
+bm25_enabled: true
+reranker_enabled: false
+reranker_model: cross-encoder/ms-marco-MiniLM-L-6-v2
+reranker_top_n: 12
+
+exclude_references: true
+enable_ocr_fallback: false
+metadata_enrichment_enabled: true
+generate_chunk_summary: false
+query_expansion_enabled: true
+citation_style: author_year_pages
+
+default_process_terms:
+  - WAAM
+  - wire arc additive manufacturing
+  - arc additive manufacturing
+  - welding
+  - process monitoring
+  - quality control
+
+section_boosts:
+  results: 0.08
+  discussion: 0.08
+  conclusions: 0.05
+  recommendations: 0.09
+  abstract: -0.03
+  introduction: -0.02

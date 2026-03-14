@@ -1,0 +1,9 @@
+{
+  "defect_name": "porosity",
+  "question": "Provide citation-ready evidence about reducing porosity in WAAM aluminum builds.",
+  "process_parameters": {
+    "shielding_gas": "argon",
+    "current": 180
+  },
+  "top_k": 5
+}
