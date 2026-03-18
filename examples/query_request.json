@@ -2,10 +2,10 @@
   "defect_name": "porosity",
   "question": "What literature-backed mitigation strategies can reduce porosity in WAAM?",
   "process_parameters": {
-    "current": 180,
-    "voltage": 24,
-    "travel_speed": 6.5,
-    "wire_feed_speed": 7.0,
+    "current_A": 180,
+    "voltage_V": 24,
+    "travel_speed_mm_s": 6.5,
+    "wire_feed_speed_m_min": 7.0,
     "shielding_gas": "argon"
   },
   "filters": {

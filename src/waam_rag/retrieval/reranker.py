@@ -29,8 +29,8 @@ class HeuristicReranker:
         for candidate in candidates:
             chunk_tokens = set(lexical_tokens(candidate.chunk.text))
             overlap = len(query_tokens.intersection(chunk_tokens)) / max(len(query_tokens), 1)
-            phrase_boost = 0.1 if candidate.chunk.defect_terms else 0.0
-            candidate.rerank_score = candidate.score * 0.7 + overlap * 0.3 + phrase_boost
+            phrase_boost = 0.08 if candidate.feature_scores.get("direct_defect_match_score", 0.0) >= 0.8 else 0.0
+            candidate.rerank_score = candidate.score * 0.82 + overlap * 0.12 + phrase_boost
             candidate.score = candidate.rerank_score
         return sorted(candidates, key=lambda item: item.score, reverse=True)[:top_k]
 

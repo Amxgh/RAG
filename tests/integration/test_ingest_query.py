@@ -28,6 +28,11 @@ def test_ingest_and_query_round_trip(rag_service, workspace_tmp_path: Path) -> N
     assert ingest_response.documents_ingested == 1
     assert ingest_response.chunks_created >= 1
     assert query_response.results
+    assert query_response.extracted_evidence
+    assert query_response.reasoning_hints
+    assert query_response.diagnostics.candidate_chunks_considered >= 1
     assert "porosity" in query_response.results[0].metadata.get("defect_terms", [])
     assert context_response.evidence
+    assert context_response.extracted_evidence
+    assert context_response.reasoning_hints
     assert context_response.evidence[0].citation.startswith("[")

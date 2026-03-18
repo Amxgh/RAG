@@ -19,10 +19,72 @@
         "process_types": ["waam"],
         "materials": ["aluminum"],
         "process_parameters": ["shielding_gas", "heat_input"],
-        "evidence_types": ["mitigation", "result"]
+        "evidence_types": ["mitigation", "result"],
+        "feature_scores": {
+          "direct_defect_match_score": 1.0,
+          "mitigation_signal_score": 0.72,
+          "parameter_relation_score": 0.61,
+          "reference_penalty_score": 0.05,
+          "final_score": 0.93
+        }
       }
     }
   ],
+  "extracted_evidence": [
+    {
+      "chunk_id": "44644a8700ed2dc6:0002",
+      "paper": "Gas Porosity Mitigation in WAAM Aluminum Builds",
+      "citation": "[Smith et al., 2022, pp. 4-5]",
+      "defects": ["porosity"],
+      "strategy": "Stable argon shielding and reduced heat input lowered pore formation during WAAM deposition, especially in aluminum walls.",
+      "mechanism": "Excess heat input destabilizes the melt pool and promotes pore formation.",
+      "parameters": ["shielding_gas", "heat_input"],
+      "parameter_effects": [
+        {
+          "parameter": "heat_input",
+          "relationship_text": "Reduced heat input lowered pore formation during WAAM deposition, especially in aluminum walls.",
+          "directionality": "increase_risk_when_high",
+          "effect_on_defect": "porosity",
+          "recommended_reasoning_hint": "Check whether heat input is too high relative to the defect mechanism."
+        }
+      ],
+      "evidence_type": "mitigation",
+      "material": "aluminum",
+      "process": "waam",
+      "experimental_outcome": "Stable argon shielding and reduced heat input lowered pore formation during WAAM deposition, especially in aluminum walls.",
+      "recommendation": "Stable argon shielding and reduced heat input lowered pore formation during WAAM deposition, especially in aluminum walls.",
+      "directness": "high",
+      "confidence": 0.86,
+      "review_or_experimental": "experimental"
+    }
+  ],
+  "evidence_summary": [
+    {
+      "theme": "optimize heat input-related parameters",
+      "supporting_chunk_ids": ["44644a8700ed2dc6:0002"],
+      "supporting_citations": ["[Smith et al., 2022, pp. 4-5]"]
+    }
+  ],
+  "reasoning_hints": [
+    "Check whether the current-voltage-travel speed combination implies excessive heat input.",
+    "Evaluate shielding gas flow and composition as a direct contributor to pore formation."
+  ],
+  "diagnostics": {
+    "dense_search_ms": 4.5,
+    "sparse_search_ms": 1.9,
+    "fusion_ms": 0.3,
+    "rerank_ms": 0.0,
+    "total_ms": 6.7,
+    "candidate_chunks_considered": 36,
+    "reference_heavy_chunks_removed": 4,
+    "subqueries_used": [
+      "defect_mitigation",
+      "defect_parameter_relationship",
+      "defect_mechanism",
+      "defect_material_process",
+      "user_question"
+    ]
+  },
   "timings_ms": {
     "dense_search": 4.5,
     "sparse_search": 1.9,

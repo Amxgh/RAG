@@ -28,6 +28,14 @@ class MetadataEnricher:
         materials = self._match_taxonomy(normalized, MATERIAL_PATTERNS)
         parameter_mentions = self._extract_parameter_mentions(normalized)
         evidence_types = self._extract_evidence_types(normalized)
+        review_or_experimental = self._classify_source_type(normalized, evidence_types)
+        evidence_directness_score = self._estimate_directness(
+            defect_terms=defect_terms,
+            parameter_mentions=parameter_mentions,
+            evidence_types=evidence_types,
+            reference_score=chunk.reference_contamination_score,
+            generic_background_score=chunk.generic_background_score,
+        )
         return chunk.model_copy(
             update={
                 "defect_terms": defect_terms,
@@ -36,6 +44,8 @@ class MetadataEnricher:
                 "process_parameters": sorted(parameter_mentions),
                 "parameter_mentions": parameter_mentions,
                 "evidence_types": evidence_types,
+                "review_or_experimental": review_or_experimental,
+                "evidence_directness_score": evidence_directness_score,
                 "metadata": {
                     **chunk.metadata,
                     "defect_terms": defect_terms,
@@ -43,6 +53,8 @@ class MetadataEnricher:
                     "materials": materials,
                     "process_parameters": sorted(parameter_mentions),
                     "evidence_types": evidence_types,
+                    "review_or_experimental": review_or_experimental,
+                    "evidence_directness_score": round(evidence_directness_score, 4),
                 },
             }
         )
@@ -70,3 +82,37 @@ class MetadataEnricher:
             if any(re.search(pattern, normalized_text) for pattern in patterns):
                 labels.append(label)
         return sorted(set(labels))
+
+    def _classify_source_type(self, normalized_text: str, evidence_types: list[str]) -> str:
+        experimental_hits = len(re.findall(r"\bexperiment|observed|measured|sample|trial|results\b", normalized_text))
+        review_hits = len(re.findall(r"\breview|survey|literature|published studies\b", normalized_text))
+        if experimental_hits and review_hits:
+            return "mixed"
+        if experimental_hits or "result" in evidence_types:
+            return "experimental"
+        if review_hits:
+            return "review"
+        return "unclear"
+
+    def _estimate_directness(
+        self,
+        *,
+        defect_terms: list[str],
+        parameter_mentions: dict[str, list[str]],
+        evidence_types: list[str],
+        reference_score: float,
+        generic_background_score: float,
+    ) -> float:
+        score = 0.0
+        if defect_terms:
+            score += 0.28
+        if parameter_mentions:
+            score += 0.18
+        if {"mitigation", "result", "recommendation"}.intersection(evidence_types):
+            score += 0.28
+        if {"cause", "mechanism"}.intersection(evidence_types):
+            score += 0.14
+        if reference_score < 0.35:
+            score += 0.08
+        score -= generic_background_score * 0.12
+        return max(0.0, min(score, 1.0))

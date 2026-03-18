@@ -6,7 +6,7 @@ import re
 from itertools import chain
 
 from waam_rag.config import Settings
-from waam_rag.domain import DEFECT_SYNONYMS, MATERIAL_PATTERNS, PROCESS_TYPES
+from waam_rag.domain import DEFECT_MECHANISM_TERMS, DEFECT_SYNONYMS, MATERIAL_PATTERNS, PROCESS_TYPES
 from waam_rag.schemas import QueryBundle, QueryRequest
 from waam_rag.utils.text import normalize_for_match
 
@@ -25,26 +25,46 @@ class QueryBuilder:
             else self.settings.query_expansion_enabled
         )
         expanded_terms = self._expanded_terms(defect_name, expansion_enabled)
-        process_fragments = request.process_parameters.to_text_fragments() if request.process_parameters else []
+        process_parameters = request.process_parameters
+        parameter_categories = process_parameters.parameter_categories() if process_parameters else []
+        parameter_values = process_parameters.normalized_values() if process_parameters else {}
+        process_fragments = (
+            [category.replace("_", " ") for category in parameter_categories]
+            + (process_parameters.categorical_terms() if process_parameters else [])
+        )
         question = (request.question or "").strip()
+        explicit_materials = request.filters.materials if request.filters else []
 
         process_types = self._detect_matches(
             " ".join(filter(None, [question, defect_name or "", *process_fragments])),
             PROCESS_TYPES,
         )
-        materials = self._detect_matches(question, MATERIAL_PATTERNS)
+        materials = list(
+            dict.fromkeys(
+                [
+                    *self._detect_matches(" ".join(filter(None, [question, *process_fragments])), MATERIAL_PATTERNS),
+                    *explicit_materials,
+                ]
+            )
+        )
+
+        subqueries = self._build_subqueries(
+            defect_name=defect_name,
+            expanded_terms=expanded_terms,
+            parameter_categories=parameter_categories,
+            process_types=process_types,
+            materials=materials,
+            question=question,
+            categorical_terms=process_parameters.categorical_terms() if process_parameters else [],
+        )
 
         query_parts = list(
             dict.fromkeys(
                 part
                 for part in chain(
+                    subqueries.values(),
                     [question] if question else [],
-                    expanded_terms,
-                    process_fragments,
-                    process_types,
-                    materials,
                     self.settings.default_process_terms,
-                    ["defect mechanism", "mitigation strategy", "process parameters", "experimental evidence"],
                 )
                 if part
             )
@@ -59,8 +79,11 @@ class QueryBuilder:
             defect_name=defect_name,
             expanded_terms=expanded_terms,
             process_fragments=process_fragments,
+            parameter_categories=parameter_categories,
+            parameter_values=parameter_values,
             materials=materials,
             process_types=process_types,
+            subqueries=subqueries,
         )
 
     def _infer_mode(self, request: QueryRequest) -> str:
@@ -107,3 +130,79 @@ class QueryBuilder:
         if request.process_parameters and defect_name:
             return f"Defect query for {defect_name} augmented with process parameters."
         return f"Defect-only retrieval for {defect_name or 'unspecified defect'}."
+
+    def _build_subqueries(
+        self,
+        *,
+        defect_name: str | None,
+        expanded_terms: list[str],
+        parameter_categories: list[str],
+        process_types: list[str],
+        materials: list[str],
+        question: str,
+        categorical_terms: list[str],
+    ) -> dict[str, str]:
+        if not defect_name and question:
+            return {"free_text": question}
+
+        mechanism_terms = list(DEFECT_MECHANISM_TERMS.get(defect_name or "", ()))
+        process_terms = process_types or ["waam", "wire arc additive manufacturing"]
+        material_terms = materials or []
+        category_terms = [category.replace("_", " ") for category in parameter_categories]
+        defect_terms = expanded_terms or ([defect_name] if defect_name else [])
+
+        subqueries = {
+            "defect_mitigation": " ".join(
+                dict.fromkeys(
+                    [
+                        *defect_terms,
+                        *process_terms,
+                        *material_terms,
+                        *categorical_terms,
+                        "mitigation",
+                        "reduce defect",
+                        "recommendation",
+                        "parameter tuning",
+                    ]
+                )
+            ).strip(),
+            "defect_parameter_relationship": " ".join(
+                dict.fromkeys(
+                    [
+                        *defect_terms,
+                        *process_terms,
+                        *category_terms,
+                        *categorical_terms,
+                        "parameter relationship",
+                        "process window",
+                        "experimental results",
+                    ]
+                )
+            ).strip(),
+            "defect_mechanism": " ".join(
+                dict.fromkeys(
+                    [
+                        *defect_terms,
+                        *process_terms,
+                        *material_terms,
+                        *mechanism_terms,
+                        "mechanism",
+                        "cause",
+                    ]
+                )
+            ).strip(),
+            "defect_material_process": " ".join(
+                dict.fromkeys(
+                    [
+                        *defect_terms,
+                        *process_terms,
+                        *material_terms,
+                        *categorical_terms,
+                        "welding additive manufacturing",
+                    ]
+                )
+            ).strip(),
+        }
+        if question:
+            subqueries["user_question"] = question
+        return {key: value for key, value in subqueries.items() if value}

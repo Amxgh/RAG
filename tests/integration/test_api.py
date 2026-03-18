@@ -75,4 +75,7 @@ def test_api_ingest_and_query(monkeypatch, workspace_tmp_path: Path) -> None:
     assert query_response.status_code == 200
     body = query_response.json()
     assert body["results"]
+    assert body["extracted_evidence"]
+    assert body["reasoning_hints"]
+    assert body["diagnostics"]["candidate_chunks_considered"] >= 1
     assert body["results"][0]["citation"].startswith("[")

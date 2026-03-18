@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 
 import numpy as np
@@ -10,10 +11,12 @@ from waam_rag.config import Settings
 from waam_rag.indexing.bm25 import BM25Index
 from waam_rag.indexing.embeddings import Embedder
 from waam_rag.indexing.repository import DocumentRepository
-from waam_rag.retrieval.fusion import ScoredCandidate, apply_domain_boosts, reciprocal_rank_fusion
+from waam_rag.retrieval.fusion import ScoredCandidate, apply_answerability_reranking, reciprocal_rank_fusion
 from waam_rag.retrieval.query_builder import QueryBuilder
 from waam_rag.retrieval.reranker import HeuristicReranker, Reranker
-from waam_rag.schemas import ChunkRecord, QueryFilters, QueryRequest
+from waam_rag.schemas import ChunkRecord, QueryBundle, QueryFilters, QueryRequest, RetrievalDiagnostics
+
+LOGGER = logging.getLogger(__name__)
 
 
 class HybridRetriever:
@@ -42,32 +45,48 @@ class HybridRetriever:
     def retrieve(
         self,
         request: QueryRequest,
-    ) -> tuple[str, list[ScoredCandidate], dict[str, float]]:
-        timings: dict[str, float] = {}
+    ) -> tuple[QueryBundle, list[ScoredCandidate], RetrievalDiagnostics]:
         bundle = self.query_builder.build(request)
         top_k = request.top_k or self.settings.top_k
         filters = self._effective_filters(request, bundle.expanded_terms)
+        all_candidates = self.repository.get_chunks(filters, include_embeddings=True)
+        candidate_chunks_considered = len(all_candidates)
+        candidates, removed_reference_chunks = self._apply_reference_filtering(all_candidates)
+
+        dense_result_sets: list[tuple[str, list[tuple[ChunkRecord, float]]]] = []
+        sparse_result_sets: list[tuple[str, list[tuple[ChunkRecord, float]]]] = []
+        subqueries = bundle.subqueries or {"primary": bundle.lexical_query}
 
         dense_start = time.perf_counter()
-        candidates = self.repository.get_chunks(filters, include_embeddings=True)
-        dense_results = self._dense_search(bundle.dense_query, candidates, self.settings.dense_top_k)
-        timings["dense_search"] = round((time.perf_counter() - dense_start) * 1000, 2)
+        for intent, subquery in subqueries.items():
+            dense_result_sets.append(
+                (
+                    f"dense:{intent}",
+                    self._dense_search(subquery, candidates, self.settings.dense_top_k),
+                )
+            )
+        dense_ms = round((time.perf_counter() - dense_start) * 1000, 2)
 
-        sparse_results: list[tuple[ChunkRecord, float]] = []
         sparse_start = time.perf_counter()
         if self.settings.bm25_enabled:
             sparse_candidates = [chunk for chunk, _ in candidates]
-            sparse_results = self.bm25_index.search(
-                bundle.lexical_query,
-                sparse_candidates,
-                top_k=self.settings.sparse_top_k,
-            )
-        timings["sparse_search"] = round((time.perf_counter() - sparse_start) * 1000, 2)
+            for intent, subquery in subqueries.items():
+                sparse_result_sets.append(
+                    (
+                        f"sparse:{intent}",
+                        self.bm25_index.search(
+                            subquery,
+                            sparse_candidates,
+                            top_k=self.settings.sparse_top_k,
+                        ),
+                    )
+                )
+        sparse_ms = round((time.perf_counter() - sparse_start) * 1000, 2)
 
         fusion_start = time.perf_counter()
-        fused = reciprocal_rank_fusion(dense_results, sparse_results, self.settings.fusion_rrf_k)
-        fused = apply_domain_boosts(fused, bundle, self.settings.section_boosts)
-        timings["fusion"] = round((time.perf_counter() - fusion_start) * 1000, 2)
+        fused = reciprocal_rank_fusion([*dense_result_sets, *sparse_result_sets], self.settings.fusion_rrf_k)
+        fused = apply_answerability_reranking(fused, bundle, self.settings)
+        fusion_ms = round((time.perf_counter() - fusion_start) * 1000, 2)
 
         rerank_enabled = request.enable_rerank if request.enable_rerank is not None else self.settings.reranker_enabled
         rerank_start = time.perf_counter()
@@ -81,9 +100,28 @@ class HybridRetriever:
             )
         else:
             ranked = ranked[:top_k]
-        timings["rerank"] = round((time.perf_counter() - rerank_start) * 1000, 2)
-        timings["total"] = round(sum(timings.values()), 2)
-        return bundle.query_summary, ranked[:top_k], timings
+        rerank_ms = round((time.perf_counter() - rerank_start) * 1000, 2)
+        diagnostics = RetrievalDiagnostics(
+            dense_search_ms=dense_ms,
+            sparse_search_ms=sparse_ms,
+            fusion_ms=fusion_ms,
+            rerank_ms=rerank_ms,
+            total_ms=round(dense_ms + sparse_ms + fusion_ms + rerank_ms, 2),
+            candidate_chunks_considered=candidate_chunks_considered,
+            reference_heavy_chunks_removed=removed_reference_chunks,
+            subqueries_used=list(subqueries),
+        )
+        if self.settings.answerability_debug and ranked:
+            LOGGER.info(
+                "retrieval_debug",
+                extra={
+                    "subqueries": list(subqueries),
+                    "top_chunk_id": ranked[0].chunk.chunk_id,
+                    "top_feature_scores": ranked[0].feature_scores,
+                    "top_debug_reasons": ranked[0].debug_reasons,
+                },
+            )
+        return bundle, ranked[:top_k], diagnostics
 
     def _dense_search(
         self,
@@ -111,3 +149,18 @@ class HybridRetriever:
         if not filters.defect_terms and request.defect_name:
             filters.defect_terms = expanded_terms[:1]
         return filters
+
+    def _apply_reference_filtering(
+        self,
+        candidates: list[tuple[ChunkRecord, np.ndarray | None]],
+    ) -> tuple[list[tuple[ChunkRecord, np.ndarray | None]], int]:
+        if not self.settings.reference_detection_enabled:
+            return candidates, 0
+        kept: list[tuple[ChunkRecord, np.ndarray | None]] = []
+        removed = 0
+        for chunk, embedding in candidates:
+            if self.settings.exclude_reference_chunks and chunk.is_reference_heavy:
+                removed += 1
+                continue
+            kept.append((chunk, embedding))
+        return kept, removed

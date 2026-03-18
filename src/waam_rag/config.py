@@ -34,10 +34,28 @@ class Settings(BaseModel):
     sparse_top_k: int = 24
     fusion_rrf_k: int = 60
 
+    reference_detection_enabled: bool = True
+    exclude_reference_chunks: bool = True
+    reference_penalty_weight: float = 0.45
+    reference_exclusion_threshold: float = 0.72
+    post_chunk_trim_reference_tails: bool = True
+
     bm25_enabled: bool = True
     reranker_enabled: bool = False
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     reranker_top_n: int = 12
+    answerability_debug: bool = False
+
+    dense_score_weight: float = 0.24
+    sparse_score_weight: float = 0.16
+    direct_defect_match_weight: float = 0.2
+    mitigation_signal_weight: float = 0.16
+    parameter_relation_weight: float = 0.14
+    experimental_evidence_weight: float = 0.12
+    mechanism_signal_weight: float = 0.1
+    material_process_match_weight: float = 0.1
+    evidence_directness_weight: float = 0.12
+    generic_background_penalty_weight: float = 0.08
 
     exclude_references: bool = True
     enable_ocr_fallback: bool = False

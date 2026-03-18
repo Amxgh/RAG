@@ -70,6 +70,11 @@ class DocumentRepository:
                     materials_json TEXT NOT NULL,
                     process_types_json TEXT NOT NULL,
                     evidence_types_json TEXT NOT NULL,
+                    reference_contamination_score REAL NOT NULL DEFAULT 0.0,
+                    is_reference_heavy INTEGER NOT NULL DEFAULT 0,
+                    generic_background_score REAL NOT NULL DEFAULT 0.0,
+                    evidence_directness_score REAL NOT NULL DEFAULT 0.0,
+                    review_or_experimental TEXT,
                     metadata_json TEXT NOT NULL,
                     embedding BLOB NOT NULL,
                     embedding_dim INTEGER NOT NULL,
@@ -79,6 +84,7 @@ class DocumentRepository:
             )
             connection.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks(doc_id)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_documents_year ON documents(year)")
+            self._migrate_chunks_table(connection)
 
     def get_document_by_source(self, source_file: str) -> DocumentRecord | None:
         with closing(self._connect()) as connection:
@@ -169,8 +175,10 @@ class DocumentRepository:
                     chunk_id, doc_id, source_file, title, authors_json, year, venue, start_page, end_page,
                     page_numbers_json, section, subsection, text, token_count, summary, defect_terms_json,
                     process_parameters_json, parameter_mentions_json, materials_json, process_types_json,
-                    evidence_types_json, metadata_json, embedding, embedding_dim
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    evidence_types_json, reference_contamination_score, is_reference_heavy,
+                    generic_background_score, evidence_directness_score, review_or_experimental,
+                    metadata_json, embedding, embedding_dim
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -195,6 +203,11 @@ class DocumentRepository:
                         json.dumps(chunk.materials),
                         json.dumps(chunk.process_types),
                         json.dumps(chunk.evidence_types),
+                        chunk.reference_contamination_score,
+                        int(chunk.is_reference_heavy),
+                        chunk.generic_background_score,
+                        chunk.evidence_directness_score,
+                        chunk.review_or_experimental,
                         json.dumps(chunk.metadata),
                         self._vector_to_blob(embedding),
                         int(embedding.shape[0]),
@@ -273,6 +286,11 @@ class DocumentRepository:
             materials=json.loads(row["materials_json"]),
             process_types=json.loads(row["process_types_json"]),
             evidence_types=json.loads(row["evidence_types_json"]),
+            reference_contamination_score=row["reference_contamination_score"] or 0.0,
+            is_reference_heavy=bool(row["is_reference_heavy"]),
+            generic_background_score=row["generic_background_score"] or 0.0,
+            evidence_directness_score=row["evidence_directness_score"] or 0.0,
+            review_or_experimental=row["review_or_experimental"],
             metadata=json.loads(row["metadata_json"]),
         )
 
@@ -281,3 +299,18 @@ class DocumentRepository:
 
     def _blob_to_vector(self, blob: bytes, dim: int) -> np.ndarray:
         return np.frombuffer(blob, dtype=np.float32, count=dim)
+
+    def _migrate_chunks_table(self, connection: sqlite3.Connection) -> None:
+        existing_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(chunks)").fetchall()
+        }
+        migrations = {
+            "reference_contamination_score": "ALTER TABLE chunks ADD COLUMN reference_contamination_score REAL NOT NULL DEFAULT 0.0",
+            "is_reference_heavy": "ALTER TABLE chunks ADD COLUMN is_reference_heavy INTEGER NOT NULL DEFAULT 0",
+            "generic_background_score": "ALTER TABLE chunks ADD COLUMN generic_background_score REAL NOT NULL DEFAULT 0.0",
+            "evidence_directness_score": "ALTER TABLE chunks ADD COLUMN evidence_directness_score REAL NOT NULL DEFAULT 0.0",
+            "review_or_experimental": "ALTER TABLE chunks ADD COLUMN review_or_experimental TEXT",
+        }
+        for column_name, statement in migrations.items():
+            if column_name not in existing_columns:
+                connection.execute(statement)

@@ -17,7 +17,9 @@ from waam_rag.ingestion.chunking import ScientificChunker
 from waam_rag.ingestion.cleaning import TextCleaner
 from waam_rag.ingestion.enrichment import MetadataEnricher
 from waam_rag.ingestion.parser import ResearchPaperParser
+from waam_rag.ingestion.quality import ChunkQualityAnalyzer
 from waam_rag.ingestion.structure import StructureExtractor
+from waam_rag.retrieval.extraction import EvidenceExtractor
 from waam_rag.retrieval.query_builder import QueryBuilder
 from waam_rag.retrieval.reranker import Reranker, build_reranker
 from waam_rag.retrieval.service import HybridRetriever
@@ -48,10 +50,12 @@ class RAGService:
         cleaner: TextCleaner | None = None,
         structure_extractor: StructureExtractor | None = None,
         chunker: ScientificChunker | None = None,
+        quality_analyzer: ChunkQualityAnalyzer | None = None,
         enricher: MetadataEnricher | None = None,
         repository: DocumentRepository | None = None,
         embedder: Embedder | None = None,
         reranker: Reranker | None = None,
+        evidence_extractor: EvidenceExtractor | None = None,
     ) -> None:
         self.settings = settings
         self.parser = parser or ResearchPaperParser(enable_ocr_fallback=settings.enable_ocr_fallback)
@@ -64,9 +68,11 @@ class RAGService:
             chunk_overlap_tokens=settings.chunk_overlap_tokens,
             generate_chunk_summary=settings.generate_chunk_summary,
         )
+        self.quality_analyzer = quality_analyzer or ChunkQualityAnalyzer(settings)
         self.enricher = enricher or MetadataEnricher()
         self.repository = repository or DocumentRepository(settings.catalog_path)
         self.embedder = embedder or build_embedder(settings)
+        self.evidence_extractor = evidence_extractor or EvidenceExtractor()
         self.bm25_index = BM25Index()
         self.retriever = HybridRetriever(
             settings=settings,
@@ -196,13 +202,16 @@ class RAGService:
                     "defect_terms": chunk.defect_terms,
                     "materials": chunk.materials,
                     "process_types": chunk.process_types,
+                    "reference_contamination_score": chunk.reference_contamination_score,
+                    "is_reference_heavy": chunk.is_reference_heavy,
                 }
                 for chunk in chunks
             ],
         }
 
     def query(self, request: QueryRequest) -> QueryResponse:
-        query_summary, candidates, timings = self.retriever.retrieve(request)
+        query_bundle, candidates, diagnostics = self.retriever.retrieve(request)
+        chunks_with_citations = []
         results = [
             RetrievedChunk(
                 rank=index,
@@ -222,11 +231,40 @@ class RAGService:
                     "dense_score": candidate.dense_score,
                     "sparse_score": candidate.sparse_score,
                     "rerank_score": candidate.rerank_score,
+                    "feature_scores": candidate.feature_scores,
+                    "debug_reasons": candidate.debug_reasons,
+                    "reference_contamination_score": candidate.chunk.reference_contamination_score,
+                    "is_reference_heavy": candidate.chunk.is_reference_heavy,
                 },
             )
             for index, candidate in enumerate(candidates, start=1)
         ]
-        return QueryResponse(query_summary=query_summary, results=results, timings_ms=timings)
+        for result, candidate in zip(results, candidates, strict=True):
+            chunks_with_citations.append((candidate.chunk, result.citation))
+        extracted_evidence = self.evidence_extractor.extract_many(
+            chunks_with_citations,
+            query_bundle=query_bundle,
+        )
+        evidence_summary, reasoning_hints = self.evidence_extractor.summarize(
+            extracted_evidence,
+            query_bundle=query_bundle,
+        )
+        timings_ms = {
+            "dense_search": diagnostics.dense_search_ms,
+            "sparse_search": diagnostics.sparse_search_ms,
+            "fusion": diagnostics.fusion_ms,
+            "rerank": diagnostics.rerank_ms,
+            "total": diagnostics.total_ms,
+        }
+        return QueryResponse(
+            query_summary=query_bundle.query_summary,
+            results=results,
+            extracted_evidence=extracted_evidence,
+            evidence_summary=evidence_summary,
+            reasoning_hints=reasoning_hints,
+            diagnostics=diagnostics,
+            timings_ms=timings_ms,
+        )
 
     def retrieve_context(self, request: QueryRequest) -> ContextPackResponse:
         query_response = self.query(request)
@@ -261,6 +299,10 @@ class RAGService:
             citation_style=self.settings.citation_style,
             evidence=evidence,
             context_text="\n\n".join(context_blocks),
+            extracted_evidence=query_response.extracted_evidence,
+            evidence_summary=query_response.evidence_summary,
+            reasoning_hints=query_response.reasoning_hints,
+            diagnostics=query_response.diagnostics,
             timings_ms=query_response.timings_ms,
         )
 
@@ -279,6 +321,7 @@ class RAGService:
         structured_blocks = self.structure_extractor.extract_blocks(cleaned_pages)
         prepared_document = parsed_document.model_copy(update={"pages": cleaned_pages})
         chunks = self.chunker.chunk_document(prepared_document, structured_blocks)
+        chunks = self.quality_analyzer.process_chunks(chunks)
         if not chunks:
             raise ValueError(f"No retrievable chunks were created for {parsed_document.file_name}")
         if self.settings.metadata_enrichment_enabled:
@@ -288,5 +331,6 @@ class RAGService:
             "defect_terms": sorted({term for chunk in chunks for term in chunk.defect_terms}),
             "materials": sorted({term for chunk in chunks for term in chunk.materials}),
             "process_types": sorted({term for chunk in chunks for term in chunk.process_types}),
+            "reference_heavy_chunks": sum(1 for chunk in chunks if chunk.is_reference_heavy),
         }
         return prepared_document, chunks
