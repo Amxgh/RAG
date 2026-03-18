@@ -1,0 +1,65 @@
+{
+  "query_summary": "Combined retrieval for porosity with process parameters and user question.",
+  "citation_style": "author_year_pages",
+  "evidence": [
+    {
+      "rank": 1,
+      "chunk_id": "44644a8700ed2dc6:0002",
+      "citation": "[Smith et al., 2022, pp. 4-5]",
+      "short_citation": "[Smith et al., 2022]",
+      "source_file": "papers/waam_porosity_review.pdf",
+      "title": "Gas Porosity Mitigation in WAAM Aluminum Builds",
+      "year": 2022,
+      "authors": ["Alice Smith", "Brian Lee"],
+      "pages": [4, 5],
+      "section": "Results and Discussion",
+      "subsection": "Mitigation Guidance",
+      "text": "Stable argon shielding and reduced heat input lowered pore formation during WAAM deposition, especially in aluminum walls.",
+      "metadata": {
+        "defect_terms": ["porosity"],
+        "process_parameters": ["shielding_gas", "heat_input"]
+      }
+    }
+  ],
+  "context_text": "1. [Smith et al., 2022, pp. 4-5]\nStable argon shielding and reduced heat input lowered pore formation during WAAM deposition, especially in aluminum walls.",
+  "extracted_evidence": [
+    {
+      "chunk_id": "44644a8700ed2dc6:0002",
+      "paper": "Gas Porosity Mitigation in WAAM Aluminum Builds",
+      "citation": "[Smith et al., 2022, pp. 4-5]",
+      "defects": ["porosity"],
+      "strategy": "Stable argon shielding and reduced heat input lowered pore formation during WAAM deposition, especially in aluminum walls.",
+      "parameters": ["shielding_gas", "heat_input"],
+      "directness": "high",
+      "confidence": 0.86,
+      "review_or_experimental": "experimental"
+    }
+  ],
+  "evidence_summary": [
+    {
+      "theme": "optimize heat input-related parameters",
+      "supporting_chunk_ids": ["44644a8700ed2dc6:0002"],
+      "supporting_citations": ["[Smith et al., 2022, pp. 4-5]"]
+    }
+  ],
+  "reasoning_hints": [
+    "Check whether the current-voltage-travel speed combination implies excessive heat input."
+  ],
+  "diagnostics": {
+    "dense_search_ms": 4.5,
+    "sparse_search_ms": 1.9,
+    "fusion_ms": 0.3,
+    "rerank_ms": 0.0,
+    "total_ms": 6.7,
+    "candidate_chunks_considered": 36,
+    "reference_heavy_chunks_removed": 4,
+    "subqueries_used": ["defect_mitigation", "defect_parameter_relationship", "defect_mechanism", "defect_material_process", "user_question"]
+  },
+  "timings_ms": {
+    "dense_search": 4.5,
+    "sparse_search": 1.9,
+    "fusion": 0.3,
+    "rerank": 0.0,
+    "total": 6.7
+  }
+}
