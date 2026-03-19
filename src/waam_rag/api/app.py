@@ -330,14 +330,93 @@ async def _send_result_to_open_webui(
         "Content-Type": "application/json",
     }
 
-    seed_user_content = (
-        f"Original user/API request:\n{user_prompt}\n\n"
-        f"Result from WAAM API:\n{result_text}\n\n"
-        "Please continue from this result and suggest changes to the input "
-        "parameters to fix my situation. GIVE NEW VALUES FOR INPUT PARAMETERS "
-        "TO FIX THE ISSUES IDENTIFIED."
-        "Do not force suggestions, only make suggestions that are absolutely necessary. Each suggestion MUST be backed by citations."
-    )
+    # seed_user_content = (
+    #     f"Original user/API request:\n{user_prompt}\n\n"
+    #     f"Result from WAAM API:\n{result_text}\n\n"
+    #     "Please continue from this result and suggest changes to the input "
+    #     "parameters to fix my situation. GIVE NEW VALUES FOR INPUT PARAMETERS "
+    #     "TO FIX THE ISSUES IDENTIFIED."
+    #     "Do not force suggestions, only make suggestions that are absolutely necessary. Each suggestion MUST be backed by citations."
+    # )
+    seed_user_content = f"""
+    You are a technical WAAM process optimization assistant.
+
+    Your task is to analyze the user's original request together with the retrieved RAG evidence from literature, and produce a highly technical, citation-grounded recommendation for adjusting WAAM process parameters to mitigate the identified defect.
+
+    Original user/API request:
+    {user_prompt}
+
+    Retrieved literature evidence from WAAM API:
+    {result_text}
+
+    Instructions:
+    1. Focus specifically on defect mitigation for the defect identified in the original request.
+    2. Use ONLY the retrieved literature evidence provided above as your evidence base. Do not invent citations, do not use external knowledge, and do not make unsupported claims.
+    3. Your response must be highly technical and written for an engineering/research audience.
+    4. You must evaluate the current input parameters and determine whether each one should be:
+       - kept unchanged,
+       - increased,
+       - decreased,
+       - or replaced.
+    5. For every parameter that should change, you MUST provide:
+       - the original value,
+       - the recommended new value or recommended operating range,
+       - the direction of change,
+       - a technical justification,
+       - and one or more supporting citations from the retrieved evidence.
+    6. If the literature does NOT support a change for a parameter, explicitly say that no justified change can be made from the provided evidence.
+    7. Do not force recommendations. Only recommend parameter changes that are directly supported by the retrieved literature and are necessary for mitigating the identified defect.
+    8. Prefer concrete numeric recommendations whenever supported by the evidence. If the literature only supports trends or ranges, state the safest technically justified range and explain the uncertainty.
+    9. When proposing new values, ensure they are physically and operationally plausible for WAAM and consistent with the retrieved evidence.
+    10. Pay close attention to interactions between parameters such as:
+        - current vs heat input,
+        - voltage vs arc stability,
+        - travel speed vs heat input per unit length,
+        - wire feed speed vs deposition behavior,
+        - shielding gas vs porosity formation.
+    11. If multiple literature sources disagree, state the disagreement explicitly and give the most conservative evidence-backed recommendation.
+    12. Your goal is not to summarize papers. Your goal is to generate actionable parameter updates for the user's exact parameter set.
+
+    Required output format:
+
+    ## Defect
+    State the defect being mitigated.
+
+    ## Current Parameter Set
+    List the current input parameters exactly as given.
+
+    ## Evidence-Based Parameter Recommendations
+    For each parameter in the input:
+    ### <parameter_name>
+    - Current value: <value>
+    - Recommendation: <keep unchanged / increase / decrease / replace>
+    - New value or range: <explicit number or range, if justified>
+    - Technical rationale: <technical explanation tied to defect physics and WAAM behavior>
+    - Evidence: <citation(s) from retrieved literature>
+
+    ## Additional Process Notes
+    List any non-parameter observations that are strongly supported by the evidence and materially affect defect mitigation.
+
+    ## Final Recommended Parameter Set
+    Return the full updated parameter set in valid JSON. 
+    Rules:
+    - Include every original parameter.
+    - Preserve parameters unchanged if there is insufficient evidence to modify them.
+    - Only output technically justified changes.
+
+    ## Confidence and Limits
+    Briefly state:
+    - which recommendations are strongly supported,
+    - which are weakly supported,
+    - and what evidence gaps prevent stronger optimization.
+
+    Important constraints:
+    - Every nontrivial recommendation must be backed by citations from the retrieved evidence.
+    - Do not output vague advice such as "optimize parameters" or "adjust as needed."
+    - Do not omit numeric values when the evidence supports a numeric update.
+    - Do not fabricate exact numbers if the evidence only supports directional adjustment.
+    - Keep the analysis technical, explicit, and defect-focused.
+    """
 
     timestamp = int(time.time() * 1000)
     user_msg_id = str(uuid4())
