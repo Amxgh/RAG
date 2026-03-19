@@ -64,6 +64,11 @@ class Settings(BaseModel):
     query_expansion_enabled: bool = True
     citation_style: str = "author_year_pages"
 
+    open_webui_base_url: str = "http://host.docker.internal:3000"
+    open_webui_api_key: str = ""
+    open_webui_model: str = "llama3.1"
+    forward_results_to_open_webui: bool = True
+
     default_process_terms: list[str] = Field(
         default_factory=lambda: [
             "WAAM",
