@@ -1,6 +1,6 @@
 {
   "defect_name": "porosity",
-  "question": "What literature-backed mitigation strategies can reduce porosity in WAAM?",
+  "question": "What literature-backed mitigation strategies can reduce porosity in WAAM? ",
   "process_parameters": {
     "current_A": 180,
     "voltage_V": 24,
