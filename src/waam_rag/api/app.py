@@ -1,15 +1,14 @@
 """FastAPI entrypoint for the WAAM RAG service."""
 
 from __future__ import annotations
-import time
-from uuid import uuid4
-import httpx
-from fastapi import BackgroundTasks
+
 import shutil
+import time
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Request
+import httpx
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from waam_rag.config import Settings, load_settings
@@ -23,6 +22,8 @@ from waam_rag.schemas import (
     ReindexRequest,
 )
 from waam_rag.services.rag_service import RAGService
+
+OPEN_WEBUI_API_KEY_HEADER = "X-Open-WebUI-API-Key"
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -83,41 +84,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return service.reindex(payload.folder_path, force=payload.force)
 
     @app.post("/query", response_model=QueryResponse)
-    async def query(payload: QueryRequest, background_tasks: BackgroundTasks) -> QueryResponse:
+    async def query(
+        payload: QueryRequest,
+        request: Request,
+        background_tasks: BackgroundTasks,
+    ) -> QueryResponse:
+        open_webui_api_key = _resolve_open_webui_api_key(request, app_settings)
         result = service.query(payload)
 
-        if app_settings.forward_results_to_open_webui and app_settings.open_webui_api_key:
-            background_tasks.add_task(
-                _send_result_to_open_webui,
-                base_url=app_settings.open_webui_base_url,
-                api_key=app_settings.open_webui_api_key,
-                model=app_settings.open_webui_model,
-                title=f"WAAM Query - {payload.defect_name or 'General'}",
-                user_prompt=payload.model_dump_json(indent=2),
-                result_text=result.model_dump_json(indent=2),
-            )
+        _enqueue_open_webui_forward(
+            background_tasks=background_tasks,
+            settings=app_settings,
+            api_key=open_webui_api_key,
+            title=f"WAAM Query - {payload.defect_name or 'General'}",
+            user_prompt=payload.model_dump_json(indent=2),
+            result_text=result.model_dump_json(indent=2),
+        )
 
         return result
 
     @app.post("/retrieve-context", response_model=ContextPackResponse)
     async def retrieve_context(
-            payload: QueryRequest,
-            background_tasks: BackgroundTasks,
+        payload: QueryRequest,
+        request: Request,
+        background_tasks: BackgroundTasks,
     ) -> ContextPackResponse:
+        open_webui_api_key = _resolve_open_webui_api_key(request, app_settings)
         result = service.retrieve_context(payload)
-        print(app_settings.forward_results_to_open_webui)
-        print(app_settings.open_webui_api_key)
-        if app_settings.forward_results_to_open_webui and app_settings.open_webui_api_key:
-            print("Attempting to post to the LLM")
-            background_tasks.add_task(
-                _send_result_to_open_webui,
-                base_url=app_settings.open_webui_base_url,
-                api_key=app_settings.open_webui_api_key,
-                model=app_settings.open_webui_model,
-                title=f"WAAM Context - {payload.defect_name or 'General'}",
-                user_prompt=payload.model_dump_json(indent=2),
-                result_text=result.model_dump_json(indent=2),
-            )
+
+        _enqueue_open_webui_forward(
+            background_tasks=background_tasks,
+            settings=app_settings,
+            api_key=open_webui_api_key,
+            title=f"WAAM Context - {payload.defect_name or 'General'}",
+            user_prompt=payload.model_dump_json(indent=2),
+            result_text=result.model_dump_json(indent=2),
+        )
 
         return result
 
@@ -152,166 +154,46 @@ def _serialize(value):
     return value
 
 
-# async def _send_result_to_open_webui(
-#         *,
-#         base_url: str,
-#         api_key: str,
-#         model: str,
-#         title: str,
-#         user_prompt: str,
-#         result_text: str,
-# ) -> None:
-#     """
-#     Create a new chat in Open WebUI and send the WAAM API result there.
-#     """
-#     headers = {
-#         "Authorization": f"Bearer {api_key}",
-#         "Content-Type": "application/json",
-#     }
-#
-#     timestamp = int(time.time() * 1000)
-#     user_msg_id = str(uuid4())
-#     assistant_msg_id = str(uuid4())
-#
-#     # What will appear in the new Open WebUI chat
-#     combined_prompt = (
-#         f"Original user/API request:\n{user_prompt}\n\n"
-#         f"Result from WAAM API:\n{result_text}\n\n"
-#         "Please continue from this result."
-#     )
-#
-#     create_chat_payload = {
-#         "chat": {
-#             "title": title,
-#             "models": [model],
-#             "messages": [
-#                 {
-#                     "id": user_msg_id,
-#                     "role": "user",
-#                     "content": combined_prompt,
-#                     "timestamp": timestamp,
-#                     "models": [model],
-#                 },
-#                 {
-#                     "id": assistant_msg_id,
-#                     "role": "assistant",
-#                     "content": "",
-#                     "parentId": user_msg_id,
-#                     "timestamp": timestamp + 1,
-#                     "models": [model],
-#                     "modelName": model,
-#                     "modelIdx": 0,
-#                 },
-#             ],
-#             "history": {
-#                 "current_id": assistant_msg_id,
-#                 "messages": {
-#                     user_msg_id: {
-#                         "id": user_msg_id,
-#                         "role": "user",
-#                         "content": combined_prompt,
-#                         "timestamp": timestamp,
-#                         "models": [model],
-#                     },
-#                     assistant_msg_id: {
-#                         "id": assistant_msg_id,
-#                         "role": "assistant",
-#                         "content": "",
-#                         "parentId": user_msg_id,
-#                         "timestamp": timestamp + 1,
-#                         "models": [model],
-#                         "modelName": model,
-#                         "modelIdx": 0,
-#                     },
-#                 },
-#             },
-#         }
-#     }
-#
-#     async with httpx.AsyncClient(timeout=120.0) as client:
-#         # Step 1: create chat
-#         create_resp = await client.post(
-#             f"{base_url}/api/v1/chats/new",
-#             headers=headers,
-#             json=create_chat_payload,
-#         )
-#         create_resp.raise_for_status()
-#         create_data = create_resp.json()
-#
-#         chat_id = create_data["id"]
-#
-#
-#         if not chat_id:
-#             raise RuntimeError(
-#                 f"Could not find chat id in Open WebUI response. Response was: {create_data}"
-#             )
-#
-#         completion_payload = {
-#             "model": model,
-#             "messages": [
-#                 {
-#                     "role": "user",
-#                     "content": combined_prompt,
-#                 }
-#             ],
-#             "stream": False,
-#         }
-#         print("Open WebUI model being used:", model)
-#         completion_resp = await client.post(
-#             f"{base_url}/api/chat/completions",
-#             headers=headers,
-#             json=completion_payload,
-#         )
-#         print("completion status:", completion_resp.status_code)
-#         print("completion body:", completion_resp.text)
-#         completion_resp.raise_for_status()
-#
-#         completion_data = completion_resp.json()
-#         assistant_text = (
-#             completion_data.get("choices", [{}])[0]
-#             .get("message", {})
-#             .get("content", "")
-#         )
-#
-#         if not assistant_text:
-#             print("No assistant response content found")
-#             return
-#
-#         completed_resp = await client.post(
-#             f"{base_url}/api/chat/completed",
-#             headers=headers,
-#             json={
-#                 "chat_id": chat_id,
-#                 "id": assistant_msg_id,
-#                 "model": model,
-#                 "session_id": str(uuid4()),
-#                 "message": {
-#                     "id": assistant_msg_id,
-#                     "role": "assistant",
-#                     "content": assistant_text,
-#                     "parentId": user_msg_id,
-#                     "timestamp": timestamp + 1,
-#                     "models": [model],
-#                     "modelName": model,
-#                     "modelIdx": 0,
-#                 },
-#             },
-#         )
-#         print("completed status:", completed_resp.status_code)
-#         print("completed body:", completed_resp.text)
-#
-#
-#         # Optional: mark completed
-#         await client.post(
-#             f"{base_url}/api/chat/completed",
-#             headers=headers,
-#             json={
-#                 "chat_id": chat_id,
-#                 "id": assistant_msg_id,
-#                 "model": model,
-#                 "session_id": str(uuid4()),
-#             },
-#         )
+def _resolve_open_webui_api_key(request: Request, settings: Settings) -> str | None:
+    if not settings.forward_results_to_open_webui:
+        return None
+
+    api_key = request.headers.get(OPEN_WEBUI_API_KEY_HEADER, "").strip()
+    if api_key:
+        return api_key
+
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            f"Missing {OPEN_WEBUI_API_KEY_HEADER} header. "
+            "Provide the Open WebUI API key on the incoming request when result forwarding is enabled."
+        ),
+    )
+
+
+def _enqueue_open_webui_forward(
+    *,
+    background_tasks: BackgroundTasks,
+    settings: Settings,
+    api_key: str | None,
+    title: str,
+    user_prompt: str,
+    result_text: str,
+) -> None:
+    if not settings.forward_results_to_open_webui or not api_key:
+        return
+
+    background_tasks.add_task(
+        _send_result_to_open_webui,
+        base_url=settings.open_webui_base_url,
+        api_key=api_key,
+        model=settings.open_webui_model,
+        title=title,
+        user_prompt=user_prompt,
+        result_text=result_text,
+    )
+
+
 async def _send_result_to_open_webui(
     *,
     base_url: str,
@@ -321,23 +203,10 @@ async def _send_result_to_open_webui(
     user_prompt: str,
     result_text: str,
 ) -> None:
-    import time
-    from uuid import uuid4
-    import httpx
-
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-
-    # seed_user_content = (
-    #     f"Original user/API request:\n{user_prompt}\n\n"
-    #     f"Result from WAAM API:\n{result_text}\n\n"
-    #     "Please continue from this result and suggest changes to the input "
-    #     "parameters to fix my situation. GIVE NEW VALUES FOR INPUT PARAMETERS "
-    #     "TO FIX THE ISSUES IDENTIFIED."
-    #     "Do not force suggestions, only make suggestions that are absolutely necessary. Each suggestion MUST be backed by citations."
-    # )
     seed_user_content = f"""
     You are a technical WAAM process optimization assistant.
 
