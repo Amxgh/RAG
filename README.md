@@ -343,6 +343,7 @@ curl -X POST http://localhost:8000/ingest ^
 ```bash
 curl -X POST http://localhost:8000/query ^
   -H "Content-Type: application/json" ^
+  -H "X-Open-WebUI-API-Key: <your_open_webui_api_key>" ^
   -d @examples/query_request.json
 ```
 
@@ -351,6 +352,7 @@ curl -X POST http://localhost:8000/query ^
 ```bash
 curl -X POST http://localhost:8000/retrieve-context ^
   -H "Content-Type: application/json" ^
+  -H "X-Open-WebUI-API-Key: <your_open_webui_api_key>" ^
   -d @examples/retrieve_context_request.json
 ```
 
@@ -363,6 +365,8 @@ curl -X POST http://localhost:8000/retrieve-context ^
 - `GET /documents/{doc_id}`
 - `POST /query`
 - `POST /retrieve-context`
+
+When `forward_results_to_open_webui` is enabled, `/query` and `/retrieve-context` must include an `X-Open-WebUI-API-Key` header on the incoming request. The service no longer reads the Open WebUI API key from environment variables.
 
 ### `POST /ingest`
 
